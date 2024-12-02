@@ -161,7 +161,8 @@ class SalesforceDataExtractor:
         query = self.soql_query or f"SELECT {','.join(fields)} FROM {self.object_name}"
         headers = {
             'Authorization': f"Bearer {self.access_token}",
-            'Content-Type': 'application/json'
+            'Content-Type': 'application/json',
+            'Sforce-Query-Options': f'batchSize={self.batch_size}'
         }
 
         try:
@@ -306,7 +307,7 @@ class SalesforceDataExtractor:
     def run(self):
         try:
             self.authenticate()
-    
+
             if self.soql_query:
                 # Extract fields from the SOQL query and check for compound fields
                 fields = self.extract_fields_from_soql(self.soql_query)
@@ -319,17 +320,17 @@ class SalesforceDataExtractor:
                 if compound_fields:
                     logging.warning(f"Compound fields detected: {compound_fields}. Switching to REST API.")
                     self.api_mode = 'rest'
-    
+
             # Fetch data using either REST or Bulk API based on the determined mode
             if self.api_mode == 'bulk':
                 records = self.fetch_data_bulk(fields)
             else:
                 data = self.fetch_data_rest(fields)
                 records = data.get('records', [])  # Unpack records here
-    
+
             # Save the fetched data to a file
             self.save_to_file(records)
-    
+
         except Exception as e:
             logging.error(f"Process failed: {str(e)}")
             raise
