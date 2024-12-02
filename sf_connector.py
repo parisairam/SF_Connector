@@ -166,18 +166,39 @@ class SalesforceDataExtractor:
 
         try:
             logging.info(f"Executing REST query: {query}")
+
+            # Initial query
             response = requests.get(
                 f"{self.instance_url}/services/data/v52.0/query", headers=headers, params={'q': query})
             response.raise_for_status()
             data = response.json()
-            logging.info(f"REST API fetched {len(data.get('records', []))} records.")
-            return data.get('records', [])
+
+            all_records = data.get('records', [])
+            logging.info(f"Fetched {len(all_records)} records in the first batch.")
+
+            # Handle pagination
+            while 'nextRecordsUrl' in data:
+                next_url = f"{self.instance_url}{data['nextRecordsUrl']}"
+                logging.info(f"Fetching next batch of records from: {next_url}")
+
+                response = requests.get(next_url, headers=headers)
+                response.raise_for_status()
+                data = response.json()
+
+                batch_records = data.get('records', [])
+                all_records.extend(batch_records)
+                logging.info(f"Fetched {len(batch_records)} additional records. Total so far: {len(all_records)}")
+
+            # Mimic the original return format
+            return {'records': all_records}
+
         except requests.exceptions.HTTPError as http_err:
             logging.error(f"HTTP error during REST query: {http_err.response.text}")
             raise
         except Exception as err:
             logging.error(f"General error during REST query: {str(err)}")
             raise
+
 
     def fetch_data_bulk(self, fields):
     # Initiate Bulk Query
@@ -285,7 +306,7 @@ class SalesforceDataExtractor:
     def run(self):
         try:
             self.authenticate()
-
+    
             if self.soql_query:
                 # Extract fields from the SOQL query and check for compound fields
                 fields = self.extract_fields_from_soql(self.soql_query)
@@ -298,19 +319,21 @@ class SalesforceDataExtractor:
                 if compound_fields:
                     logging.warning(f"Compound fields detected: {compound_fields}. Switching to REST API.")
                     self.api_mode = 'rest'
-
+    
             # Fetch data using either REST or Bulk API based on the determined mode
             if self.api_mode == 'bulk':
                 records = self.fetch_data_bulk(fields)
             else:
-                records = self.fetch_data_rest(fields)
-
+                data = self.fetch_data_rest(fields)
+                records = data.get('records', [])  # Unpack records here
+    
             # Save the fetched data to a file
             self.save_to_file(records)
-
+    
         except Exception as e:
             logging.error(f"Process failed: {str(e)}")
             raise
+
 
 
 
