@@ -1,13 +1,13 @@
 #!/bin/bash
 
-# Check if the user provided a directory
-if [ -z "$1" ]; then
-    echo "Usage: $0 <directory_path>"
+# Check if directory and date are provided
+if [ -z "$1" ] || [ -z "$2" ]; then
+    echo "Usage: $0 <directory_path> <YYYY-MM-DD>"
     exit 1
 fi
 
 LOG_DIR="$1"
-TODAY=$(date +"%Y-%m-%d")
+SEARCH_DATE="$2"
 CSV_FILE="abinitio_logs_summary.csv"
 
 # Create CSV file with headers if it doesn't exist
@@ -15,29 +15,29 @@ if [ ! -f "$CSV_FILE" ]; then
     echo "File,Graph Name,PSET Name,TWS Job Name,Start Time,End Time" > "$CSV_FILE"
 fi
 
-# Find all files created today
-FILES=$(find "$LOG_DIR" -type f -newermt "$TODAY 00:00:00")
+# Find all files created on the given date
+FILES=$(find "$LOG_DIR" -type f -newermt "$SEARCH_DATE 00:00:00" ! -newermt "$SEARCH_DATE 23:59:59")
 
-# Check if any files were found
+# Check if files exist
 if [ -z "$FILES" ]; then
-    echo "No log files found for today in $LOG_DIR"
+    echo "No log files found for $SEARCH_DATE in $LOG_DIR"
     exit 0
 fi
 
-# Loop through each file
+# Process each file
 for FILE in $FILES; do
     echo "Processing file: $FILE"
 
-    # Extract required details
+    # Extract details
     GRAPH_NAME=$(grep -oP "AB_OPS_GRAPH=\K.*" "$FILE" | head -1)
     PSET_NAME=$(grep -oP "AB_OPS_PSET=\K.*" "$FILE" | head -1)
     JOB_NAME=$(grep -oP "UNISON_JOB='\K[^']+" "$FILE" | head -1)
     START_TIME=$(grep -oP "JOB_START_TM='\K[^']+" "$FILE" | head -1)
 
-    # Find the last phase's end timestamp
-    END_TIME=$(grep -oP ".*Phase \d+ ended.*" "$FILE" | tail -1 | awk '{print $1, $2}')
+    # Find the last "Phase X ended" timestamp
+    END_TIME=$(grep -oP ".*Phase \d+ ended" "$FILE" | tail -1 | awk '{print $1, $2}')
 
-    # Append details to CSV file
+    # Append to CSV
     echo "\"$FILE\",\"$GRAPH_NAME\",\"$PSET_NAME\",\"$JOB_NAME\",\"$START_TIME\",\"$END_TIME\"" >> "$CSV_FILE"
 done
 
