@@ -1,0 +1,49 @@
+Sub ExtractFieldNames()
+    Dim ws As Worksheet
+    Dim lastRow As Long
+    Dim i As Long
+    Dim data As String
+    Dim fieldName As String
+    Dim delimiterPos As Long
+    
+    ' Set the worksheet (change if needed)
+    Set ws = ActiveSheet
+    
+    ' Find the last row with data in Column A
+    lastRow = ws.Cells(ws.Rows.Count, 1).End(xlUp).Row
+    
+    ' Loop through each row
+    For i = 1 To lastRow
+        ' Get the text from Column A
+        data = ws.Cells(i, 1).Value
+        
+        ' Find the position of either = or ;
+        delimiterPos = 0
+        If InStr(data, "=") > 0 Then
+            delimiterPos = InStr(data, "=")
+        ElseIf InStr(data, ";") > 0 Then
+            delimiterPos = InStr(data, ";")
+        End If
+        
+        ' If a delimiter is found, proceed with extracting the field name
+        If delimiterPos > 0 Then
+            fieldName = Trim(Left(data, delimiterPos - 1)) ' Get the part before the delimiter
+            
+            ' Remove the data type prefix (anything before the last space)
+            If InStrRev(fieldName, " ") > 0 Then
+                fieldName = Trim(Mid(fieldName, InStrRev(fieldName, " ") + 1))
+            End If
+            
+            ' Remove "m0_" prefix if present
+            If Left(fieldName, 3) = "m0_" Then
+                fieldName = Mid(fieldName, 4) ' Remove first 3 characters (m0_)
+            End If
+            
+            ' Store the extracted field name in Column B
+            ws.Cells(i, 2).Value = fieldName
+        End If
+    Next i
+    
+    ' Notify the user
+    MsgBox "Field names extracted successfully!", vbInformation
+End Sub
