@@ -1,0 +1,35 @@
+Sub ExtractFieldNames()
+    Dim ws As Worksheet
+    Dim lastRow As Long
+    Dim i As Long
+    Dim data As String
+    Dim fieldName As String
+    
+    ' Set the worksheet (change if needed)
+    Set ws = ActiveSheet
+    
+    ' Find the last row with data in Column A
+    lastRow = ws.Cells(ws.Rows.Count, 1).End(xlUp).Row
+    
+    ' Loop through each row
+    For i = 1 To lastRow
+        ' Get the text from Column A
+        data = ws.Cells(i, 1).Value
+        
+        ' Extract field name (assuming format: <type> <field_name> = ...)
+        If InStr(data, "=") > 0 Then
+            fieldName = Trim(Split(data, "=")(0)) ' Get the part before '='
+            
+            ' Remove the data type prefix (anything before the last space)
+            If InStrRev(fieldName, " ") > 0 Then
+                fieldName = Trim(Mid(fieldName, InStrRev(fieldName, " ") + 1))
+            End If
+            
+            ' Store the extracted field name in Column B
+            ws.Cells(i, 2).Value = fieldName
+        End If
+    Next i
+    
+    ' Notify the user
+    MsgBox "Field names extracted successfully!", vbInformation
+End Sub
