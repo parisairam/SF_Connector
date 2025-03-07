@@ -25,6 +25,11 @@ Sub ExtractFieldNames()
                 fieldName = Trim(Mid(fieldName, InStrRev(fieldName, " ") + 1))
             End If
             
+            ' Remove "m0_" prefix if present
+            If Left(fieldName, 3) = "m0_" Then
+                fieldName = Mid(fieldName, 4) ' Remove first 3 characters (m0_)
+            End If
+            
             ' Store the extracted field name in Column B
             ws.Cells(i, 2).Value = fieldName
         End If
