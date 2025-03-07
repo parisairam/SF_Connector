@@ -1,0 +1,53 @@
+#!/bin/bash
+
+# Check if directory and date are provided
+if [ -z "$1" ] || [ -z "$2" ]; then
+    echo "Usage: $0 <directory_path> <YYYY-MM-DD>"
+    exit 1
+fi
+
+LOG_DIR="$1"
+SEARCH_DATE="$2"
+CSV_FILE="abinitio_logs_summary.csv"
+
+# Create CSV file with headers if it doesn't exist
+if [ ! -f "$CSV_FILE" ]; then
+    echo "File,Graph Name,PSET Name,TWS Job Name,Start Time,End Time,SFTP Log Path" > "$CSV_FILE"
+fi
+
+# Find all files created on the given date
+FILES=$(find "$LOG_DIR" -type f -newermt "$SEARCH_DATE 00:00:00" ! -newermt "$SEARCH_DATE 23:59:59")
+
+# Check if files exist
+if [ -z "$FILES" ]; then
+    echo "No log files found for $SEARCH_DATE in $LOG_DIR"
+    exit 0
+fi
+
+# Process each file
+for FILE in $FILES; do
+    echo "Processing file: $FILE"
+
+    # Extract details
+    GRAPH_NAME=$(grep -oP "AB_OPS_GRAPH=\K.*" "$FILE" | head -1)
+    PSET_NAME=$(grep -oP "AB_OPS_PSET=\K.*" "$FILE" | head -1)
+    JOB_NAME=$(grep -oP "UNISON_JOB='\K[^']+" "$FILE" | head -1)
+    START_TIME=$(grep -oP "JOB_START_TM='\K[^']+" "$FILE" | head -1)
+
+    # Find the last "Phase X ended" timestamp (including full date and time)
+    END_TIME=$(grep -oP "^[A-Za-z]{3} [0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}" "$FILE" | tail -1)
+
+    # Default SFTP Log Path (Empty)
+    SFTP_LOG_PATH=""
+
+    # Check if the filename contains "Automation_trial_4"
+    if [[ "$FILE" == *"Automation_trial_4"* ]]; then
+        # Extract the last line containing "SFTP_TO_log" and get the SFTP log path
+        SFTP_LOG_PATH=$(grep "SFTP_TO_log" "$FILE" | tail -1 | awk '{print $NF}')
+    fi
+
+    # Append to CSV
+    echo "\"$FILE\",\"$GRAPH_NAME\",\"$PSET_NAME\",\"$JOB_NAME\",\"$START_TIME\",\"$END_TIME\",\"$SFTP_LOG_PATH\"" >> "$CSV_FILE"
+done
+
+echo "Log summary saved to $CSV_FILE"
