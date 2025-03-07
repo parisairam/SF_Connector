@@ -1,0 +1,89 @@
+I've updated the script to write the extracted details into a CSV file (abinitio_logs_summary.csv). The script now:
+
+1. Creates a CSV file with headers if it doesn't exist.
+
+
+2. Extracts the required details (Graph Name, PSET Name, TWS Job Name, Start Time, End Time) from each log file created today.
+
+
+3. Appends the extracted details to the CSV file.
+
+
+
+Updated Script (parse_abinitio_logs.sh)
+
+#!/bin/bash
+
+# Check if the user provided a directory
+if [ -z "$1" ]; then
+    echo "Usage: $0 <directory_path>"
+    exit 1
+fi
+
+LOG_DIR="$1"
+TODAY=$(date +"%Y-%m-%d")
+CSV_FILE="abinitio_logs_summary.csv"
+
+# Create CSV file with headers if it doesn't exist
+if [ ! -f "$CSV_FILE" ]; then
+    echo "File,Graph Name,PSET Name,TWS Job Name,Start Time,End Time" > "$CSV_FILE"
+fi
+
+# Find all files created today
+FILES=$(find "$LOG_DIR" -type f -newermt "$TODAY 00:00:00")
+
+# Check if any files were found
+if [ -z "$FILES" ]; then
+    echo "No log files found for today in $LOG_DIR"
+    exit 0
+fi
+
+# Loop through each file
+for FILE in $FILES; do
+    echo "Processing file: $FILE"
+
+    # Extract required details
+    GRAPH_NAME=$(grep -oP "AB_OPS_GRAPH=\K.*" "$FILE" | head -1)
+    PSET_NAME=$(grep -oP "AB_OPS_PSET=\K.*" "$FILE" | head -1)
+    JOB_NAME=$(grep -oP "UNISON_JOB='\K[^']+" "$FILE" | head -1)
+    START_TIME=$(grep -oP "JOB_START_TM='\K[^']+" "$FILE" | head -1)
+    END_TIME=$(tail -1 "$FILE")
+
+    # Append details to CSV file
+    echo "\"$FILE\",\"$GRAPH_NAME\",\"$PSET_NAME\",\"$JOB_NAME\",\"$START_TIME\",\"$END_TIME\"" >> "$CSV_FILE"
+done
+
+echo "Log summary saved to $CSV_FILE"
+
+
+---
+
+How to Use
+
+1. Give execute permissions to the script:
+
+chmod +x parse_abinitio_logs.sh
+
+
+2. Run the script with the log directory path:
+
+./parse_abinitio_logs.sh /path/to/logs
+
+
+3. Check the output in abinitio_logs_summary.csv
+
+cat abinitio_logs_summary.csv
+
+
+
+
+---
+
+Example Output (CSV File)
+
+File,Graph Name,PSET Name,TWS Job Name,Start Time,End Time
+"/logs/log1.txt","/path/to/graph1","/path/to/pset1","JOB_ABC","2025-03-05 09:00:00","End message from last line"
+"/logs/log2.txt","/path/to/graph2","/path/to/pset2","JOB_XYZ","2025-03-05 10:30:00","End message from last line"
+
+This will store all log details in a structured format. Let me know if you need any modifications!
+
