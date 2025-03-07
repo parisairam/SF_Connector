@@ -34,8 +34,8 @@ for FILE in $FILES; do
     JOB_NAME=$(grep -oP "UNISON_JOB='\K[^']+" "$FILE" | head -1)
     START_TIME=$(grep -oP "JOB_START_TM='\K[^']+" "$FILE" | head -1)
 
-    # Find the last "Phase X ended" timestamp
-    END_TIME=$(grep -oP ".*Phase \d+ ended" "$FILE" | tail -1 | awk '{print $1, $2}')
+    # Find the last "Phase X ended" timestamp (including full date and time)
+    END_TIME=$(grep -oP "^[A-Za-z]{3} [0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}" "$FILE" | tail -1)
 
     # Append to CSV
     echo "\"$FILE\",\"$GRAPH_NAME\",\"$PSET_NAME\",\"$JOB_NAME\",\"$START_TIME\",\"$END_TIME\"" >> "$CSV_FILE"
