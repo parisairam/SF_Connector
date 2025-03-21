@@ -1,0 +1,184 @@
+import requests
+import logging
+import io
+import os
+from datetime import datetime, timedelta
+import csv
+import xml.etree.ElementTree as ET
+import re
+import time
+from concurrent.futures import ThreadPoolExecutor
+
+
+class SalesforceDataExtractor:
+    def __init__(self, credentials_file, object_name=None, soql_query=None, api_mode='rest',
+                 output_file='output.txt', output_format='txt', delimiter='|',
+                 batch_size=200, concurrency_threads=4):
+        self.credentials = self.load_credentials(credentials_file)
+        self.object_name = object_name
+        self.soql_query = soql_query
+        self.api_mode = api_mode.lower()
+        self.output_file = output_file
+        self.output_format = output_format.lower()
+        self.delimiter = delimiter
+        self.batch_size = batch_size
+        self.concurrency_threads = concurrency_threads
+        self.access_token = None
+        self.instance_url = None
+        self.last_run_timestamp = self.load_last_run_timestamp()
+        self.setup_logging()
+
+    def setup_logging(self):
+        logging.basicConfig(level=logging.DEBUG,
+                            format='%(asctime)s - %(levelname)s - %(message)s',
+                            handlers=[logging.FileHandler("sf_extractor.log"),
+                                      logging.StreamHandler()])
+
+    def load_credentials(self, credentials_file):
+        credentials = {}
+        with open(credentials_file, 'r') as file:
+            for line in file:
+                key, value = line.strip().split('=')
+                credentials[key.strip()] = value.strip()
+        return credentials
+
+    def authenticate(self):
+        auth_url = "https://your-instance.salesforce.com/services/oauth2/token"
+        payload = {
+            'grant_type': 'password',
+            'client_id': self.credentials['client_id'],
+            'client_secret': self.credentials['client_secret'],
+            'username': self.credentials['username'],
+            'password': f"{self.credentials['password']}{self.credentials['security_token']}"
+        }
+        response = requests.post(auth_url, data=payload)
+        response.raise_for_status()
+        auth_response = response.json()
+        self.access_token = auth_response['access_token']
+        self.instance_url = auth_response['instance_url']
+        logging.info("Authenticated successfully.")
+
+    def describe_object(self):
+        describe_url = f"{self.instance_url}/services/data/v52.0/sobjects/{self.object_name}/describe"
+        headers = {'Authorization': f"Bearer {self.access_token}"}
+        response = requests.get(describe_url, headers=headers)
+        response.raise_for_status()
+        fields = response.json()['fields']
+        return {field['name'] for field in fields}
+
+    def load_last_run_timestamp(self):
+        if os.path.exists("last_run_timestamp.txt"):
+            with open("last_run_timestamp.txt", "r") as file:
+                return file.read().strip()
+        return None
+
+    def save_last_run_timestamp(self):
+        timestamp = datetime.utcnow().isoformat()
+        with open("last_run_timestamp.txt", "w") as file:
+            file.write(timestamp)
+
+    def construct_query(self, available_fields):
+        if self.last_run_timestamp:
+            return f"SELECT {', '.join(available_fields)} FROM {self.object_name} WHERE SystemModstamp >= {self.last_run_timestamp}"
+        return f"SELECT {', '.join(available_fields)} FROM {self.object_name}"
+
+    def fetch_data_rest(self, fields):
+        query = self.construct_query(fields)
+        headers = {'Authorization': f"Bearer {self.access_token}", 'Sforce-Query-Options': f'batchSize={self.batch_size}'}
+        records = []
+        url = f"{self.instance_url}/services/data/v52.0/query?q={query}"
+
+        while url:
+            response = requests.get(url, headers=headers)
+            response.raise_for_status()
+            data = response.json()
+            records.extend(data.get('records', []))
+            url = f"{self.instance_url}{data.get('nextRecordsUrl')}" if 'nextRecordsUrl' in data else None
+            logging.info(f"Fetched {len(records)} records so far...")
+
+        return records
+
+    def fetch_data_bulk(self, fields):
+        job_url = f"{self.instance_url}/services/data/v52.0/jobs/query"
+        headers = {'Authorization': f"Bearer {self.access_token}", 'Content-Type': 'application/json'}
+        query = self.construct_query(fields)
+        job_payload = {"query": query, "operation": "query", "concurrencyMode": "Parallel"}
+
+        job_response = requests.post(job_url, headers=headers, json=job_payload)
+        job_response.raise_for_status()
+        job_id = job_response.json().get('id')
+
+        while True:
+            status_response = requests.get(f"{job_url}/{job_id}", headers=headers)
+            status_response.raise_for_status()
+            status = status_response.json()
+            if status['state'] == 'JobComplete':
+                break
+            elif status['state'] in ['Failed', 'Aborted']:
+                raise Exception(f"Bulk Job failed with state: {status['state']}")
+            time.sleep(5)
+
+        results_url = f"{job_url}/{job_id}/results"
+        response = requests.get(results_url, headers=headers)
+        response.raise_for_status()
+        csv_data = response.content.decode('utf-8')
+
+        csv_reader = csv.DictReader(io.StringIO(csv_data))
+        records = [row for row in csv_reader]
+        return records
+
+    def get_deleted_records(self):
+        if not self.last_run_timestamp:
+            return []
+
+        deleted_url = f"{self.instance_url}/services/data/v52.0/sobjects/{self.object_name}/deleted/?start={self.last_run_timestamp}&end={datetime.utcnow().isoformat()}"
+        headers = {'Authorization': f"Bearer {self.access_token}"}
+        response = requests.get(deleted_url, headers=headers)
+        response.raise_for_status()
+        deleted_records = response.json().get('deletedRecords', [])
+        return [record['id'] for record in deleted_records]
+
+    def save_to_file(self, records):
+        if not records:
+            logging.warning("No records to write.")
+            return
+
+        if self.output_format == 'csv':
+            with open(self.output_file, 'w', newline='') as csvfile:
+                writer = csv.DictWriter(csvfile, fieldnames=records[0].keys())
+                writer.writeheader()
+                writer.writerows(records)
+            logging.info(f"Data successfully written to {self.output_file}")
+
+    def run(self):
+        try:
+            self.authenticate()
+            available_fields = self.describe_object()
+
+            # Ensure fields exist before extracting
+            if self.soql_query:
+                requested_fields = set(re.findall(r"SELECT (.*?) FROM", self.soql_query, re.IGNORECASE)[0].split(','))
+                fields_to_extract = requested_fields.intersection(available_fields)
+            else:
+                fields_to_extract = available_fields
+
+            if self.api_mode == 'bulk':
+                records = self.fetch_data_bulk(fields_to_extract)
+            else:
+                records = self.fetch_data_rest(fields_to_extract)
+
+            deleted_ids = self.get_deleted_records()
+            records = [record for record in records if record['Id'] not in deleted_ids]
+
+            self.save_to_file(records)
+            self.save_last_run_timestamp()
+        except Exception as e:
+            logging.error(f"Process failed: {str(e)}")
+            raise
+
+
+# Example Usage
+if __name__ == "__main__":
+    extractor = SalesforceDataExtractor(credentials_file="creds.txt", object_name="Account",
+                                        api_mode='bulk', output_file='Account.csv', output_format='csv')
+    extractor.run()
